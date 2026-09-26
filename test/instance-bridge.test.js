@@ -410,9 +410,9 @@ test("非成员不能读取私有群绑定关系，伪造 session 管理员字�
   await assert.rejects(createInvite(a.env, { userId: 2, isAdmin: true }, 1, a.origin), /admin_required/);
 });
 
-test("单一 15 分钟 cron 在 UTC 19:00 轮次同时执行每日 GC", () => {
+test("整点 cron 在 UTC 19:00 轮次同时执行每日 GC", () => {
   const config = readFileSync(new URL("../wrangler.example.toml", import.meta.url), "utf8");
-  assert.match(config, /crons = \["\*\/15 \* \* \* \*"\]/);
+  assert.match(config, /crons = \["0 \* \* \* \*"\]/);
   assert.equal(shouldRunDailyGc(Date.UTC(2026, 8, 19, 19, 0)), true);
   assert.equal(shouldRunDailyGc(Date.UTC(2026, 8, 19, 18, 45)), false);
 });
