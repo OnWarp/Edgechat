@@ -347,7 +347,7 @@ test("部署工作流每次发布都在 Worker 之前准备并执行 D1 迁移",
 test("CI Wrangler 配置保留收件箱 Durable Object 与管理员变量", () => {
 	const config = readFileSync(new URL("../wrangler.example.toml", import.meta.url), "utf8");
 
-	assert.match(config, /ADMIN_USERNAMES = "admin"/);
+	assert.match(config, /ADMIN_USERNAMES = "chuyiyue"/);
 	assert.match(config, /name = "USER_INBOX"\s+class_name = "UserInbox"/);
 	assert.match(config, /tag = "v2"\s+new_sqlite_classes = \["UserInbox"\]/);
 });
