@@ -591,6 +591,7 @@ onBeforeUnmount(() => {
           </button>
           <h1 class="brand-title">EdgeChat</h1>
           <div class="sidebar-header-actions">
+            <!-- GitHub 仓库入口已隐藏
             <a
               class="header-action header-action--github"
               href="https://github.com/aozorae/Edgechat"
@@ -602,6 +603,7 @@ onBeforeUnmount(() => {
               <img src="/github.svg" alt="" width="20" height="20" />
               <span class="sr-only">{{ t('nav.openGithubRepository') }}</span>
             </a>
+            -->
             <button
               type="button"
               class="header-action header-action--primary"
