@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="Edgechat.png" alt="EdgeChat" width="640" />
+  <img src="Edgechat.jpg" alt="EdgeChat" width="640" />
 
   <h3>自己的聊天空间，不必从维护服务器开始。</h3>
   <p>基于 Cloudflare 的开源自部署团队聊天系统</p>
@@ -66,6 +66,12 @@ EdgeChat 面向这样一种需求：**想拥有一个自己的聊天空间，又
 | 自己修改与扩展 | 源码开放，可以按自己的需求调整界面和功能 |
 
 项目本身免费开源。云服务费用取决于 Cloudflare 的套餐、资源配置和实际用量。
+
+## 私聊语音通话
+
+`2.11.0` 起，网页私聊顶栏支持一对一语音通话。默认 P2P，直连失败自动回退 TURN，也可在电话旁的紧凑选择器手动切换；提供接听、拒绝、静音、挂断和时长。不支持群聊、视频或后台离线来电，demo 不建立真实通话。
+
+TURN 需要两项 Worker / Repository Secrets：`EDGECHAT_TURN_KEY_ID` 与 `EDGECHAT_TURN_API_TOKEN`。未配置时只能 P2P。Cloudflare SFU 与 TURN 每月共享前 1,000 GB 免费额度，超额 $0.05/GB；参见 [配置、协议与验收](docs/api/voice-calls.md)。
 
 ## 跨实例群组绑定
 

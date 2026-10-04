@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="Edgechat.png" alt="EdgeChat" width="640" />
+  <img src="Edgechat.jpg" alt="EdgeChat" width="640" />
 
   <h3>Your own chat space, without starting by maintaining a server.</h3>
   <p>Open-source, self-hosted team chat running on Cloudflare</p>
@@ -30,6 +30,12 @@
 You do not need to maintain a permanently running server. The application and data resources are deployed in your own Cloudflare account, with GitHub Actions handling automatic deployment and updates. If your members already use Telegram, you can connect the groups on both sides and let everyone keep using the chat entry point they are familiar with.
 
 [Interface Preview](#interface-preview) · [Live Demo](#live-demo) · [Telegram Bridging](#telegram-two-way-bridging) · [Features](#features) · [Privacy and Encryption](#privacy-and-encryption) · [Deployment](#deployment) · [Local Development](#local-development)
+
+## Direct-message voice calls
+
+From `2.11.0`, web DMs support one-to-one voice calls with answer, decline, mute, hangup and duration. P2P is the default; a compact selector supports manual TURN switching and failed direct connections fall back to TURN. No group/video calls or offline incoming calls; the demo does not place real calls.
+
+Configure Worker / Repository Secrets `EDGECHAT_TURN_KEY_ID` and `EDGECHAT_TURN_API_TOKEN` to enable TURN. Without them only P2P is available. Cloudflare SFU and TURN share the first 1,000 GB free each month; excess egress costs $0.05/GB. See [configuration and protocol](docs/api/voice-calls.md).
 
 ## Cross-instance group binding
 
