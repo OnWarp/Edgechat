@@ -19,6 +19,8 @@ import { listActiveUsers } from './data/users.js';
 import { ApiError } from './errors.js';
 import { adminMiddleware, authMiddleware } from './middleware.js';
 import { registerAdminRoutes } from './api/admin.js';
+import { registerRbacRoutes } from './api/rbac.ts';
+import { registerStorageRoutes } from './api/storage.ts';
 import { registerMaintenanceRoutes } from './api/maintenance.ts';
 import { registerStealthRoutes } from './api/stealth.ts';
 import { createSiteEntry } from './stealth/entry.ts';
@@ -29,9 +31,11 @@ import { InstanceBridge } from './do/InstanceBridge.ts';
 import { rescueBridgeDeliveries } from './integrations/instance-bridge/delivery.ts';
 import { registerChannelRoutes } from './api/channels.js';
 import { registerContactRoutes } from './api/contacts.ts';
+import { registerLoginNetworkRoutes } from './api/login-network.ts';
 import { registerDmRoutes } from './api/dm.js';
 import { registerCallRoutes } from './api/calls.ts';
 import { VoiceCall } from './do/VoiceCall.ts';
+import { TelegramNotifications } from './do/TelegramNotifications.ts';
 import { registerMessageRoutes } from './api/messages.js';
 import { registerUploadRoutes } from './api/upload.js';
 import { registerUserBlockRoutes } from './api/user-blocks.ts';
@@ -113,6 +117,7 @@ app.get('/api/register-links/:token', async (c) => {
 app.post('/api/register-links/:token/register', async (c) => {
   const token = String(c.req.param('token') || '').trim();
   const payload = await parseJsonRequest(c.req.raw);
+  if (Object.keys(payload).some((key) => !['username', 'displayName', 'password'].includes(key))) return errorResponse('请求包含不允许修改的字段');
   const username = String(payload.username || '').trim();
   const password = String(payload.password || '');
   const displayName = String(payload.displayName || username).trim();
@@ -154,7 +159,7 @@ app.post('/api/auth/login', async (c) => {
     return errorResponse('请输入用户名和密码');
   }
 
-  const session = await loginWithPassword(c.env, username, password);
+  const session = await loginWithPassword(c.env, username, password, c.req.raw);
   if (!session) {
     return errorResponse('账号或密码错误', 401);
   }
@@ -169,6 +174,7 @@ app.post('/api/auth/login', async (c) => {
 registerV1Routes(app);
 
 app.use('/api/*', authMiddleware);
+registerLoginNetworkRoutes(app);
 
 app.get('/api/auth/session', async (c) => {
   const session = c.get('session');
@@ -289,6 +295,8 @@ registerUserProfileRoutes(app);
 registerUploadRoutes(app);
 registerChannelRoutes(app);
 registerAdminRoutes(app);
+registerRbacRoutes(app);
+registerStorageRoutes(app);
 registerMaintenanceRoutes(app);
 registerStealthRoutes(app);
 registerTelegramAdminRoutes(app);
@@ -356,4 +364,4 @@ export function shouldRunDailyGc(scheduledTime) {
   const time = new Date(scheduledTime);
   return time.getUTCHours() === 19 && time.getUTCMinutes() === 0;
 }
-export { ChannelRoom, Scheduler, UserInbox, InstanceBridge, VoiceCall };
+export { ChannelRoom, Scheduler, UserInbox, InstanceBridge, VoiceCall, TelegramNotifications };

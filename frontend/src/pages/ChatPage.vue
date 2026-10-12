@@ -10,14 +10,10 @@ import {
 import { isDemoMode } from '../runtime.js';
 import ConversationList from '../components/chat/ConversationList.vue';
 import InAppNotificationStack from '../components/chat/InAppNotificationStack.vue';
-import MessageAttachment from '../components/chat/MessageAttachment.vue';
+import MessageList from '../components/chat/MessageList.vue';
 import MessageComposer from '../components/chat/MessageComposer.vue';
-import MessageMarkdown from '../components/chat/MessageMarkdown.vue';
 import MessageContextMenu from '../components/chat/MessageContextMenu.vue';
-import MessageReplyPreview from '../components/chat/MessageReplyPreview.vue';
 import PinnedMessageBar from '../components/chat/PinnedMessageBar.vue';
-import SenderSourceBadge from '../components/chat/SenderSourceBadge.vue';
-import SenderTitleBadge from '../components/chat/SenderTitleBadge.vue';
 import RoomBridgeNotice from '../components/chat/RoomBridgeNotice.vue';
 import PublicGroupDiscovery from '../components/chat/PublicGroupDiscovery.vue';
 import UiAvatar from '../components/ui/Avatar.vue';
@@ -59,7 +55,7 @@ const ContactsPage = defineAsyncComponent(() => import('./ContactsPage.vue'));
 
 const router = useRouter();
 const route = useRoute();
-const { formatTime: formatLocaleTime, t } = useI18n();
+const { t } = useI18n();
 const error = ref('');
 const activeRoom = ref(null);
 const replyingTo = ref(null);
@@ -68,7 +64,7 @@ const showMobileNavigation = ref(false);
 const publicGroupPreview = ref(null);
 const joiningPublicGroup = ref(false);
 const session = computed(() => store.session);
-const showAdminEntry = computed(() => Boolean(session.value?.isAdmin));
+const showAdminEntry = computed(() => Boolean(session.value?.canAccessAdmin));
 const isContactsView = computed(() => route.name === 'contacts');
 const contactsVisited = ref(isContactsView.value);
 const inboxActiveRoom = computed(() => isContactsView.value ? null : activeRoom.value);
@@ -137,7 +133,8 @@ function openInAppNotification(notification) {
 const {
   isBlockedByMe: activeDmBlockedByMe,
   saving: userBlockSaving,
-  toggleUserBlock
+  toggleUserBlock,
+  applyBlockState
 } = useUserBlock({ activeRoom, dms, error });
 
 function handleRoomActivity({ room, message }) {
@@ -162,12 +159,12 @@ function handleRoomAccessRevoked(room) {
 }
 
 const {
-  messages, pinnedMessage, highlightedMessageId, loading, wsStatus, composerText, pendingAttachment, sending,
-  messagesEl, isOwnMessage,
+  messages, pinnedMessage, highlightedMessageId, loading, wsStatus, composerText, pendingAttachments, sending,
+  messagesEl,
 	  loadMessages, activateRoom, deactivateRoom, pauseRoom, disconnectSocket, sendMessage, sendVoiceMessage, deleteMessage,
 	  pinMessage, unpinMessage, revealPinnedMessage,
 	  revealMessage,
-  uploadAttachment, clearAttachment, loadOlder
+  uploadAttachment, clearAttachment, retryAttachment, loadOlder
 } = useChatRoom({
   activeRoom,
   session,
@@ -195,10 +192,10 @@ const { connectUnreadInbox, disconnectUnreadInbox } = useUnreadInbox({
 const wsConnected = computed(() => wsStatus.value === 'open');
 const activeRoomSubtitle = computed(() => roomSubtitle(activeRoom.value, wsConnected.value));
 const canModerateMessages = computed(
-  () => Boolean(session.value?.isAdmin || canManageActiveRoom.value)
+  () => Boolean(activeRoom.value?.kind !== 'dm' && canManageActiveRoom.value)
 );
 const canPinMessages = computed(
-  () => Boolean(activeRoom.value?.kind !== 'dm' && (session.value?.isAdmin || canManageActiveRoom.value))
+  () => Boolean(activeRoom.value?.kind !== 'dm' && canManageActiveRoom.value)
 );
 const {
   messageMenu,
@@ -494,9 +491,6 @@ onMounted(() => {
     openNativeRoom();
   });
 });
-function formatBubbleTime(value) {
-  return value ? formatLocaleTime(value) : '';
-}
 
 onBeforeUnmount(() => {
   window.removeEventListener('pagehide', voiceCall.hangup);
@@ -569,6 +563,16 @@ watch(
           >
             <ContactRound :size="20" aria-hidden="true" />
             <span class="right-sidebar-action__label">{{ t('contacts.title') }}</span>
+          </button>
+          <button
+            type="button"
+            class="right-sidebar-action right-sidebar-action--labeled right-sidebar-action--settings tooltip"
+            :data-tooltip="t('nav.personalSettings')"
+            :aria-label="t('nav.personalSettings')"
+            @click="openSettings"
+          >
+            <Settings :size="20" aria-hidden="true" />
+            <span class="right-sidebar-action__label">{{ t('nav.personalSettings') }}</span>
           </button>
           <button
             type="button"
@@ -682,8 +686,10 @@ watch(
     <ContactsPage
       v-if="contactsVisited"
       v-show="isContactsView"
+      :visible="isContactsView"
       @open-navigation="showMobileNavigation = true"
       @open-profile="openLocalUserProfile"
+      @unblocked="applyBlockState($event, false)"
     />
 
     <!-- Right Main Chat Window -->
@@ -802,58 +808,18 @@ watch(
           <div v-if="loading" class="messages-hint">{{ t('chat.loadingMessages') }}</div>
           <div v-else-if="!messages.length" class="messages-hint">{{ t('chat.noMessages') }}</div>
 
-          <article
-            v-for="msg in messages" :key="msg.id"
-            :data-message-id="msg.id"
-            class="message-row"
-			:class="{
-			  'message-row--own': isOwnMessage(msg),
-			  'message-row--actionable': true
-			}"
-          >
-            <button
-              v-if="!isOwnMessage(msg)"
-              type="button"
-              class="profile-avatar-trigger message-avatar-trigger"
-              :aria-label="t('profile.view', { name: msg.sender.displayName })"
-              @click="openSenderProfile(msg.sender)"
-            >
-              <UiAvatar class="message-avatar" :src="msg.sender.avatarUrl" :alt="msg.sender.displayName" :fallback="msg.sender.displayName" size="sm" />
-            </button>
-            <div
-              class="message-bubble"
-              :class="{
-                'message-bubble--with-attachment': msg.attachment,
-                'message-bubble--highlighted': Number(highlightedMessageId) === Number(msg.id)
-              }"
-              @contextmenu="openMessageContextMenu($event, msg)"
-              @pointerdown="startMessageLongPress($event, msg)"
-              @pointermove="trackMessageLongPress"
-              @pointerup="cancelMessageLongPress"
-              @pointercancel="cancelMessageLongPress"
-            >
-			  <div v-if="activeRoom.kind !== 'dm' && !isOwnMessage(msg)" class="message-sender-name">
-				<span>{{ msg.sender.displayName }}</span>
-				<SenderTitleBadge :identity="msg.sender" />
-				<SenderSourceBadge :source="msg.sender.source" :instance="msg.sender.sourceInstance" />
-			  </div>
-			  <MessageReplyPreview
-				v-if="msg.replyTo"
-				class="message-bubble__reply"
-				:reply="msg.replyTo"
-				:clickable="!msg.replyTo.deleted"
-				@reveal="revealMessage(msg.replyToMessageId)"
-			  />
-			  <MessageMarkdown
-				v-if="msg.content"
-				:content="msg.content"
-				:mentions="msg.mentions"
-				:current-user-id="session?.userId"
-			  />
-              <MessageAttachment v-if="msg.attachment" :attachment="msg.attachment" />
-              <span class="message-time">{{ formatBubbleTime(msg.createdAt) }}</span>
-            </div>
-          </article>
+          <MessageList
+            :messages="messages"
+            :current-user-id="session?.userId"
+            :is-direct="activeRoom.kind === 'dm'"
+            :highlighted-message-id="highlightedMessageId"
+            @profile="openSenderProfile"
+            @reveal="revealMessage"
+            @contextmenu="openMessageContextMenu"
+            @long-press="startMessageLongPress"
+            @track-press="trackMessageLongPress"
+            @cancel-press="cancelMessageLongPress"
+          />
         </section>
 
         <MessageContextMenu
@@ -875,7 +841,7 @@ watch(
 		<MessageComposer
 		  ref="messageComposer"
 		  v-model="composerText"
-		  :pending-attachment="pendingAttachment"
+		  :pending-attachments="pendingAttachments"
 		  :sending="sending"
 			  :disabled="!activeRoom || activeDmBlockedByMe"
 			  :error="error"
@@ -887,6 +853,7 @@ watch(
 			  @cancel-reply="replyingTo = null"
 		  @upload="uploadAttachment"
 		  @clear-attachment="clearAttachment"
+		  @retry-attachment="retryAttachment"
 		/>
       </template>
 
@@ -1252,6 +1219,10 @@ watch(
   text-align: center;
 }
 
+.right-sidebar-action--settings .right-sidebar-action__label {
+  white-space: normal;
+}
+
 .tooltip {
   position: relative;
 }
@@ -1470,97 +1441,6 @@ watch(
   padding: 64px 24px;
   color: var(--chat-subtle);
   font-size: 14px;
-}
-
-.message-row {
-  display: flex;
-  align-items: flex-end;
-  gap: 10px;
-  margin-bottom: 16px;
-  width: 100%;
-  justify-content: flex-start;
-}
-
-.message-row--own {
-  justify-content: flex-end;
-}
-
-.message-bubble--highlighted {
-  outline: 3px solid rgba(0, 128, 105, 0.3);
-  outline-offset: 3px;
-  transition: outline-color 180ms ease;
-}
-
-.message-avatar-trigger {
-  position: relative;
-  min-width: 34px;
-  min-height: 34px;
-}
-/* 扩大触摸命中区域，但保留原有 34px 头像与气泡排版。 */
-.message-avatar-trigger::before {
-  content: "";
-  position: absolute;
-  inset: -5px;
-  border-radius: 50%;
-}
-.message-avatar {
-  width: 34px;
-  height: 34px;
-  border-radius: 50%;
-  box-shadow: none;
-}
-
-.message-bubble {
-  min-width: 0;
-  max-width: min(76%, 620px);
-  padding: 10px 12px 8px;
-  border-radius: 14px 14px 14px 4px;
-  background: var(--chat-paper);
-  border: none;
-  position: relative;
-  word-break: break-word;
-  box-shadow: var(--chat-shadow);
-}
-
-.message-row--actionable .message-bubble {
-  touch-action: pan-y;
-  -webkit-touch-callout: none;
-}
-
-.message-bubble--with-attachment {
-  padding-bottom: 20px;
-}
-
-.message-row--own .message-bubble {
-  background: var(--chat-outgoing);
-  border-radius: 14px 14px 4px 14px;
-}
-
-.message-sender-name {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 12.5px;
-  font-weight: 600;
-  color: var(--chat-accent);
-  margin-bottom: 4px;
-  overflow-wrap: anywhere;
-  min-width: 0;
-}
-
-.message-time {
-  position: absolute;
-  right: 8px;
-  bottom: 6px;
-  font-size: 11px;
-  line-height: 1;
-  color: var(--chat-muted);
-  white-space: nowrap;
-  user-select: none;
-}
-
-.message-bubble__reply {
-	margin-bottom: 5px;
 }
 
 .chat-empty {
@@ -1802,15 +1682,6 @@ watch(
     scrollbar-gutter: auto;
   }
 
-  .message-row {
-    gap: 8px;
-    margin-bottom: 12px;
-  }
-
-  .message-bubble {
-    max-width: calc(100% - 44px);
-  }
-
   .room-management-layer {
     position: fixed;
     inset: 0;
@@ -1842,9 +1713,6 @@ watch(
     gap: 4px;
   }
 
-  .message-bubble {
-    max-width: calc(100% - 40px);
-  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1852,8 +1720,7 @@ watch(
   .right-sidebar-action,
   .right-sidebar-user,
   .tooltip::after,
-  .chat-header__button,
-  .message-bubble--highlighted {
+  .chat-header__button {
     transition: none;
   }
 }

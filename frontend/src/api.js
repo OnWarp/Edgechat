@@ -50,6 +50,7 @@ async function request(path, options = {}) {
       && !contentType.includes('application/json'))) && typeof window !== 'undefined') {
       dispatchAuthInvalid(error.message);
     }
+    if (response.status === 403 && path.startsWith('/admin/') && typeof window !== 'undefined') window.dispatchEvent(new Event('authorization-changed'));
 
     throw error;
   }
@@ -58,6 +59,16 @@ async function request(path, options = {}) {
 }
 
 export default {
+  authorization() { return request('/me/authorization'); },
+  rbacRoles(offset = 0) { return request(`/admin/rbac/roles?offset=${offset}`); },
+  rbacPermissions() { return request('/admin/rbac/permissions'); },
+  rbacMembers(id, offset = 0) { return request(`/admin/rbac/roles/${id}/members?offset=${offset}`); },
+  saveRbacRole(id, body) { return request(`/admin/rbac/roles${id ? `/${id}` : ''}`, { method: id ? 'PATCH' : 'POST', headers: { 'Content-Type': 'application/json' }, body }); },
+  deleteRbacRole(id) { return request(`/admin/rbac/roles/${id}`, { method: 'DELETE' }); },
+  assignRbacRole(id, body) { return request(`/admin/rbac/users/${id}/role`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body }); },
+  unprotectUser(id, expectedAuthzVersion) { return request(`/admin/rbac/users/${id}/unprotect`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: { expectedAuthzVersion } }); },
+  adminAudit(offset = 0) { return request(`/admin/audit?offset=${offset}`); },
+  adminStorage() { return request('/admin/storage'); },
   callConfig(roomId) {
     return request(`/calls/${roomId}/config`, { signal: AbortSignal.timeout(10000) });
   },
@@ -95,6 +106,11 @@ export default {
   logout() {
     return request('/auth/logout', { method: 'POST' });
   },
+  reportLoginNetwork(probeId, result, options) {
+    return request('/auth/login-network', {
+      ...options, method: 'POST', headers: { 'Content-Type': 'application/json' }, body: { probeId, ...result }
+    });
+  },
   session() {
     return request('/auth/session');
   },
@@ -120,6 +136,9 @@ export default {
   },
   getContacts(options = {}) {
     return request('/contacts', options);
+  },
+  getBlockedUsers(options = {}) {
+    return request('/users/blocked', options);
   },
   getUserProfile(userId, options = {}) {
     return request(`/users/${encodeURIComponent(userId)}/profile`, options);
@@ -254,8 +273,11 @@ export default {
     }
     return resolveServerUrl(url.pathname + url.search);
   },
-  adminUsers() {
-    return request('/admin/users');
+  adminUsers(offset = 0) {
+    return request(`/admin/users?offset=${offset}`);
+  },
+  adminUserDetails(userId, options = {}) {
+    return request(`/admin/users/${userId}/details`, options);
   },
   adminOverview() {
     return request('/admin/overview');
@@ -269,7 +291,7 @@ export default {
       query.set('cursor', cursor);
     }
     const suffix = query.size ? `?${query.toString()}` : '';
-    return request(`/admin/storage/scan${suffix}`);
+    return request(`/admin/storage/scan${suffix}`, { method: 'POST', body: '{}' });
   },
   adminSiteSettings() {
     return request('/admin/site-settings');

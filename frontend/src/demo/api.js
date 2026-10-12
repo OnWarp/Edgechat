@@ -4,6 +4,7 @@ import {
   findDemoChannel,
   findDemoUser,
   getDemoMembers,
+  isDemoUserBlocked,
   projectDemoChannel,
   projectDemoDm,
   projectDemoUser,
@@ -16,6 +17,7 @@ import { demoMaintenanceReport } from './maintenance.ts';
 import { demoInstanceBridge } from './instance-bridge.js';
 import { isGroupChannelKind } from '../../../shared/group-channel.ts';
 import { parseLocalUserId, validateBio } from '../../../shared/user-profile.ts';
+import { authorizeDemoAdmin, demoAuthorization, demoOwnsGroup, demoRbac } from './rbac.ts';
 
 const DEMO_DELAY_MS = 90;
 
@@ -50,6 +52,7 @@ function sessionForUser(user) {
     bio: user.bio ?? '',
     avatarUrl: user.avatarUrl,
     isAdmin: Boolean(user.isAdmin),
+    ...demoAuthorization(user),
     sessionVersion: 1
   };
 }
@@ -77,9 +80,9 @@ function telegramPayload() {
   return cloneDemo({
     config: demoState.telegram.config,
     channels: demoState.channels
-      .filter((channel) => isGroupChannelKind(channel.kind))
+      .filter((channel) => isGroupChannelKind(channel.kind) && demoOwnsGroup(channel.id))
       .map(({ id, name, kind }) => ({ id, name, kind })),
-    mappings: demoState.telegram.mappings
+    mappings: demoState.telegram.mappings.filter((m) => demoOwnsGroup(m.channelId))
   });
 }
 
@@ -213,7 +216,7 @@ function createGroup(body) {
   return projectDemoChannel(channel);
 }
 
-function createAdminUser(body) {
+function createAdminUser(body, allowRole = false) {
   const username = String(body.username || '').trim();
   const displayName = String(body.displayName || username).trim();
   if (!username || !body.password) fail('请填写用户名和密码');
@@ -223,6 +226,9 @@ function createAdminUser(body) {
     displayName,
     avatarUrl: '',
     isAdmin: false,
+    roleId: allowRole ? Number(body.roleId || 1) : 1,
+    managementProtected: allowRole && Number(body.roleId || 1) !== 1,
+    authzVersion: 0,
     isDisabled: false,
     isPermanentlyDisabled: false,
     disabledUntil: null,
@@ -232,12 +238,15 @@ function createAdminUser(body) {
   return projectDemoUser(user);
 }
 
-export async function requestDemo(path, options = {}) {
+async function handleDemoRequest(path, options = {}) {
   await delay();
   const method = String(options.method || 'GET').toUpperCase();
   const url = new URL(path, 'https://edgechat.demo');
   const pathname = url.pathname;
   const body = parseBody(options);
+  if (pathname.startsWith('/admin/')) authorizeDemoAdmin(pathname, method, body);
+  const rbac = demoRbac(pathname, method, body, Number(url.searchParams.get('offset') || 0));
+  if (rbac) return rbac;
   if (pathname === '/admin/stealth') {
     if (method === 'PUT') demoState.stealthEnabled = body.enabled === true;
     return { enabled: demoState.stealthEnabled === true };
@@ -292,6 +301,11 @@ export async function requestDemo(path, options = {}) {
   }
   if (method === 'GET' && pathname === '/contacts') {
     return contactsPayload();
+  }
+  if (method === 'GET' && pathname === '/users/blocked') {
+    return { users: demoState.users
+      .filter((user) => isDemoUserBlocked(demoState.session.userId, user.id))
+      .map(({ id, username, displayName, avatarUrl }) => ({ id, username, displayName, avatarUrl })) };
   }
   let match = pathname.match(/^\/users\/([^/]+)\/profile$/);
   if (method === 'GET' && match) {
@@ -436,19 +450,42 @@ export async function requestDemo(path, options = {}) {
   }
 
   if (method === 'GET' && pathname === '/admin/overview') {
-    return cloneDemo(adminOverviewPayload());
+    const data = adminOverviewPayload();
+    return { site: data.site, stats: { users: data.users.length, activeUsers: data.users.filter((u) => !u.isDisabled).length,
+      publicChannels: data.channels.filter((g) => g.kind === 'public').length, privateChannels: data.channels.filter((g) => g.kind === 'private').length,
+      dms: data.dms.length, messages: [...data.channels, ...data.dms].reduce((count, g) => count + g.messageCount, 0) } };
   }
   if (method === 'GET' && pathname === '/admin/maintenance') {
     return demoMaintenanceReport();
   }
-  if (method === 'GET' && pathname === '/admin/storage/scan') {
+  if (method === 'POST' && pathname === '/admin/storage/scan') {
     return cloneDemo(adminStoragePayload());
   }
+  if (method === 'GET' && pathname === '/admin/storage') return { ...cloneDemo(adminStoragePayload()), scannedAt: new Date().toISOString() };
   if (method === 'GET' && pathname === '/admin/users') {
-    return { users: cloneDemo(demoState.users.map(projectDemoUser)) };
+    const offset = Number(url.searchParams.get('offset') || 0);
+    const includePermissions = demoAuthorization(findDemoUser(demoState.session.userId)).isSuperAdmin;
+    return { users: cloneDemo(demoState.users.slice(offset, offset + 100).map((user) => {
+      const { permissions, ...identity } = demoAuthorization(user);
+      return { ...projectDemoUser(user), ...identity, ...(includePermissions ? { permissions } : {}) };
+    })) };
   }
   if (method === 'POST' && pathname === '/admin/users') {
-    return { user: createAdminUser(body) };
+    return { user: createAdminUser(body, true) };
+  }
+
+  match = pathname.match(/^\/admin\/users\/(\d+)\/details$/);
+  if (method === 'GET' && match) {
+    const user = findDemoUser(match[1]);
+    if (!user) fail('用户不存在', 404);
+    // 演示使用文档保留地址，不采集访客网络或设备信息。
+    return { user: { ...cloneDemo(projectDemoUser(user)), isAdmin: Boolean(user.isAdmin), bio: user.bio || '', loginHistory: [
+      { id: 3, ip: '2001:db8::10', loginAt: '2026-10-05 08:00:00', webrtcIps: ['192.0.2.10'], webrtcCheckedAt: '2026-10-05 08:00:01',
+        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36' },
+      { id: 2, ip: '192.0.2.20', loginAt: '2026-10-04 08:00:00', webrtcIps: ['192.0.2.21'], webrtcCheckedAt: '2026-10-04 08:00:01',
+        userAgent: 'Mozilla/5.0 (Linux; Android 8.0; Pixel 2 Build/OPD1) AppleWebKit/537.36 Chrome/90.0.0.0 Mobile Safari/537.36' },
+      { id: 1, ip: '192.0.2.30', loginAt: '2026-10-03 08:00:00', webrtcIps: [], webrtcCheckedAt: null, userAgent: '' },
+    ] } };
   }
 
   match = pathname.match(/^\/admin\/users\/(\d+)\/reset-password$/);
@@ -482,7 +519,11 @@ export async function requestDemo(path, options = {}) {
   }
 
   if (method === 'GET' && pathname === '/admin/register-links') {
-    return { invites: cloneDemo(demoState.invites) };
+    const auth = demoAuthorization(findDemoUser(demoState.session.userId));
+    return { invites: cloneDemo(demoState.invites.map((invite) => {
+      if (!auth.permissions.includes('invites.create')) { const { token, ...summary } = invite; return summary; }
+      return invite;
+    })) };
   }
   if (method === 'POST' && pathname === '/admin/register-links') {
     return { invite: createInvite(body) };
@@ -571,6 +612,7 @@ export async function requestDemo(path, options = {}) {
   if (method === 'POST' && match) {
     const invite = demoState.invites.find((item) => item.token === decodeURIComponent(match[1]));
     if (!invite?.isAvailable) fail('注册链接已失效', 404);
+    if (Object.keys(body).some((k) => !['username', 'displayName', 'password'].includes(k))) fail('请求包含不允许修改的字段');
     createAdminUser(body);
     invite.usedCount += 1;
     invite.remainingUses = Math.max(0, invite.maxUses - invite.usedCount);
@@ -580,4 +622,15 @@ export async function requestDemo(path, options = {}) {
   }
 
   fail(`演示接口未实现：${method} ${pathname}`, 404);
+}
+
+export async function requestDemo(path, options = {}) {
+  const result = await handleDemoRequest(path, options);
+  const method = String(options.method || 'GET').toUpperCase();
+  if (path.startsWith('/admin/') && method !== 'GET') {
+    if (!demoState.adminAudit) demoState.adminAudit = [];
+    demoState.adminAudit.push({ id: demoState.adminAudit.length + 1, actor_name: demoState.session.username,
+      action: `${method} ${path.split('?')[0]}`, target: '', created_at: new Date().toISOString() });
+  }
+  return result;
 }

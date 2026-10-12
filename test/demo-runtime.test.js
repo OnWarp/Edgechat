@@ -32,7 +32,7 @@ test('demo backend exposes chat, contacts, admin, storage and Telegram fixture d
 		requestDemo('/bootstrap'),
 		requestDemo('/contacts'),
     requestDemo('/admin/overview'),
-    requestDemo('/admin/storage/scan'),
+    requestDemo('/admin/storage/scan', { method: 'POST', body: '{}' }),
     requestDemo('/admin/telegram')
   ]);
 
@@ -47,7 +47,8 @@ test('demo backend exposes chat, contacts, admin, storage and Telegram fixture d
 	const general = await requestDemo('/channels/1/members');
 	assert.equal(general.members.find((member) => member.id === 1).isAdmin, true);
 	assert.equal(general.members.find((member) => member.id === 5).isDisabled, true);
-  assert.equal(overview.channels.length, 4);
+  assert.equal(overview.stats.publicChannels + overview.stats.privateChannels, 4);
+  assert.equal('channels' in overview, false);
   assert.equal(storage.scannedObjects, 4);
   assert.equal(storage.items.some((item) => item.ownerType === 'telegram'), true);
   assert.equal(telegram.config.configured, true);
@@ -187,11 +188,15 @@ test('demo room socket echoes sent messages through the real-time contract', asy
 test('demo direct messages honor blocking and resume after unblocking', async () => {
 	await requestDemo('/users/2/block', { method: 'PUT' });
 	assert.equal((await requestDemo('/bootstrap')).dms[0].isBlockedByMe, true);
+	const blocked = (await requestDemo('/users/blocked')).users;
+	assert.deepEqual(blocked.map((user) => user.id), [2]);
+	assert.deepEqual(Object.keys(blocked[0]).sort(), ['avatarUrl', 'displayName', 'id', 'username']);
 
 	await requestDemo('/auth/login', {
 		method: 'POST',
 		body: { username: 'alice', password: 'demo' }
 	});
+	assert.deepEqual((await requestDemo('/users/blocked')).users, [], '反向拉黑不属于本人的列表');
 	const frames = [];
 	let socket;
 	await new Promise((resolve) => {
@@ -219,6 +224,8 @@ test('demo direct messages honor blocking and resume after unblocking', async ()
 		body: { username: 'admin', password: 'demo' }
 	});
 	await requestDemo('/users/2/block', { method: 'DELETE' });
+	assert.deepEqual((await requestDemo('/users/blocked')).users, []);
+	assert.equal((await requestDemo('/bootstrap')).dms[0].isBlockedByMe, false);
 	await requestDemo('/auth/login', {
 		method: 'POST',
 		body: { username: 'alice', password: 'demo' }

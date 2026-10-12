@@ -106,14 +106,15 @@ test("full schema executes baseline migration plan into ledger and passes system
     CHANNEL_ROOM: namespace('ChannelRoom'), USER_INBOX: namespace('UserInbox'), SCHEDULER: namespace('Scheduler'),
     INSTANCE_BRIDGE: namespace('InstanceBridge'),
     VOICE_CALL: namespace('VoiceCall'),
+    TELEGRAM_NOTIFICATIONS: namespace('TelegramNotifications'),
     EDGECHAT_ENCRYPTION_KEYRING: 'presence-only'
   });
   assert.equal(result.status, 'ok');
   assert.ok(result.checks.every((check) => check.status === 'ok'));
-  db.exec('DROP INDEX idx_messages_reply_attention; DROP TRIGGER clear_pin_after_message_soft_delete; ALTER TABLE users DROP COLUMN disabled_until;');
+  db.exec('DROP INDEX idx_messages_reply_attention; DROP TRIGGER clear_pin_after_message_soft_delete; DROP TRIGGER protect_last_super_update; DROP TRIGGER protect_last_super_delete; ALTER TABLE users DROP COLUMN disabled_until;');
   const drift = await inspectSchema(async (sql) => rows(db, sql), manifest);
   assert.equal(drift.status, 'drift');
-  assert.deepEqual(drift.missingArtifacts.sort(), ['column:users.disabled_until', 'index:idx_messages_reply_attention', 'trigger:clear_pin_after_message_soft_delete']);
+  assert.deepEqual(drift.missingArtifacts.sort(), ['column:users.disabled_until', 'index:idx_messages_reply_attention', 'trigger:clear_pin_after_message_soft_delete', 'trigger:protect_last_super_delete', 'trigger:protect_last_super_update']);
   db.close();
 });
 
@@ -149,7 +150,7 @@ test("demo maintenance report uses the generated manifest and matches the produc
   assert.equal(report.status, "ok");
   assert.equal(report.version, `v${project.version}`);
   assert.equal(report.expectedMigration, D1_MIGRATIONS.at(-1).id);
-  assert.deepEqual(report.checks.map((check) => check.id), ["d1", "schema", "sessions", "files", "channelRoom", "userInbox", "scheduler", "instanceBridge", "environment"]);
+  assert.deepEqual(report.checks.map((check) => check.id), ["d1", "schema", "sessions", "files", "channelRoom", "userInbox", "scheduler", "instanceBridge", "voiceCall", "telegramNotifications", "environment"]);
   assert.equal(report.checks.find((check) => check.id === "schema").schema.status, "ok");
 });
 
